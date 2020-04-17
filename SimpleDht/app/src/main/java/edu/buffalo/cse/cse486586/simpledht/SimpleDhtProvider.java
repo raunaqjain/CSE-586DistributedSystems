@@ -232,6 +232,7 @@ public class SimpleDhtProvider extends ContentProvider {
 
             while (true){
                 try {
+                    Log.d("CHECKING GIT", "");
                     Log.d("SERVER", "Connected");
                     Socket socket = serverSocket.accept();
                     ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
