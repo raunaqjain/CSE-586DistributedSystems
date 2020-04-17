@@ -1,10 +1,10 @@
 {
     "logs": [
         {
-            "outputFile": "/Users/raunaq/AndroidStudioProjects/SimpleDht/app/build/intermediates/incremental/mergeDebugResources/merged.dir/values-v11/values-v11.xml",
+            "outputFile": "/Users/raunaq/AndroidStudioProjects/CSE-586DistributedSystems/SimpleDht/app/build/intermediates/incremental/mergeDebugResources/merged.dir/values-v11/values-v11.xml",
             "map": [
                 {
-                    "source": "/Users/raunaq/AndroidStudioProjects/SimpleDht/app/src/main/res/values-v11/styles.xml",
+                    "source": "/Users/raunaq/AndroidStudioProjects/CSE-586DistributedSystems/SimpleDht/app/src/main/res/values-v11/styles.xml",
                     "from": {
                         "startLines": "6",
                         "startColumns": "4",

@@ -44,7 +44,7 @@ public class SimpleDhtProvider extends ContentProvider {
     ArrayList<String> remotePorts = new ArrayList<String>(5);
 
     public SimpleDhtProvider(){
-        remotePorts.add(REMOTE_PORT0);
+//        remotePorts.add(REMOTE_PORT0);
         remotePorts.add(REMOTE_PORT1);
         remotePorts.add(REMOTE_PORT2);
         remotePorts.add(REMOTE_PORT3);
@@ -61,10 +61,12 @@ public class SimpleDhtProvider extends ContentProvider {
 //
 //    TreeSet<BigInteger> aliveNodes = new TreeSet<BigInteger>(new TheComparator());
     TreeSet<BigInteger> aliveNodes = new TreeSet<BigInteger>();
+    TreeSet<BigInteger> aliveModuloNodes = new TreeSet<BigInteger>();
 
     BigInteger myHash;
     BigInteger succ;
     BigInteger prev;
+    BigInteger modulo;
 
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
@@ -85,13 +87,16 @@ public class SimpleDhtProvider extends ContentProvider {
         String value = (String) values.get(VALUE_FIELD);
 
         try {
-            BigInteger keyHash = new BigInteger(genHash(key), 16);
+            BigInteger keyHash = new BigInteger(genHash(key), 16).mod(modulo);
             if (keyHash.compareTo(myHash) < 0){
                 String file = getContext().getCacheDir().toString() + "/" + values.get("key").toString() + ".txt";
                 FileWriter fileWriter = new FileWriter(file);
                 fileWriter.write(values.get("value").toString());
                 fileWriter.flush();
                 fileWriter.close();
+            }
+            else if ((keyHash.compareTo(myHash) > 0) & (keyHash.compareTo(prev)> 0)){
+
             }
             else {
                 new ClientTask().execute("INSERT", succ);
@@ -168,10 +173,22 @@ public class SimpleDhtProvider extends ContentProvider {
         return formatter.toString();
     }
 
+    public void updateHashes(){
+        modulo = aliveNodes.last().add(BigInteger.valueOf(1));
+        myHash = myHash.mod(modulo);
+        ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
+        for (int i = 0; i < tempHash.size(); i++) {
+            tempHash.set(i, tempHash.get(i).mod(modulo));
+            Log.d("Update hash", ""+tempHash.get(i));
+        }
+
+        aliveModuloNodes = new TreeSet<BigInteger>(tempHash);
+    }
+
     public void updateNeighbours(){
 
         try {
-            ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
+            ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveModuloNodes);
             Log.d("Number of Nodes", "" + tempHash.size());
             Log.d("My Hash", ""+myHash);
 //            prev = tempHash.get(0);
@@ -243,9 +260,12 @@ public class SimpleDhtProvider extends ContentProvider {
                     if (flag.equals("JOIN")){
                         aliveNodes.add((BigInteger) data[2]);
                         Log.d("SERVER", data[0] + "-" + data[1]);
+                        updateHashes();
                         System.out.println(aliveNodes);
+                        System.out.println(aliveModuloNodes);
                         updateNeighbours();
                         System.out.println(aliveNodes);
+                        System.out.println(aliveModuloNodes);
                         Log.d("SUCC", String.valueOf(succ));
                         Log.d("PREV", String.valueOf(prev));
                         bMulticastMessage(new Object[] {"JOIN MULTICAST", aliveNodes}, remotePorts);
@@ -254,13 +274,14 @@ public class SimpleDhtProvider extends ContentProvider {
 
                     else if(flag.equals("JOIN MULTICAST")){
                         aliveNodes = (TreeSet<BigInteger>) data[1];
+                        updateHashes();
                         System.out.println(aliveNodes);
+                        System.out.println(aliveModuloNodes);
                         updateNeighbours();
-                        Log.d("Server", "JOIN MULTICAST");
                         System.out.println(aliveNodes);
+                        System.out.println(aliveModuloNodes);
                         Log.d("SUCC", String.valueOf(succ));
                         Log.d("PREV", String.valueOf(prev));
-
                     }
 
                 } catch (Exception e){
