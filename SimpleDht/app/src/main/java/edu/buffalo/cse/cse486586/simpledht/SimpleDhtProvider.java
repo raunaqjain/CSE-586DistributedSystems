@@ -1,5 +1,9 @@
 package edu.buffalo.cse.cse486586.simpledht;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -16,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Formatter;
+import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.TreeSet;
 
@@ -24,6 +29,7 @@ import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
+import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.telephony.TelephonyManager;
@@ -42,6 +48,7 @@ public class SimpleDhtProvider extends ContentProvider {
     static final String REMOTE_PORT3 = "11120";
     static final String REMOTE_PORT4 = "11124";
     ArrayList<String> remotePorts = new ArrayList<String>(5);
+    Hashtable<BigInteger, String> hashDict = new Hashtable<BigInteger, String>();
 
     public SimpleDhtProvider(){
 //        remotePorts.add(REMOTE_PORT0);
@@ -61,7 +68,6 @@ public class SimpleDhtProvider extends ContentProvider {
 //
 //    TreeSet<BigInteger> aliveNodes = new TreeSet<BigInteger>(new TheComparator());
     TreeSet<BigInteger> aliveNodes = new TreeSet<BigInteger>();
-    TreeSet<BigInteger> aliveModuloNodes = new TreeSet<BigInteger>();
 
     BigInteger myHash;
     BigInteger succ;
@@ -80,6 +86,22 @@ public class SimpleDhtProvider extends ContentProvider {
         return null;
     }
 
+    public void insert(BigInteger keyHash, String[] values){
+        try {
+            if ((keyHash.compareTo(prev) > 0) & (keyHash.compareTo(myHash) < 0)) {
+                String file = getContext().getCacheDir().toString() + "/" + values[0] + ".txt";
+                FileWriter fileWriter = new FileWriter(file);
+                fileWriter.write(values[1]);
+                fileWriter.flush();
+                fileWriter.close();
+            } else {
+                new ClientTask().execute("INSERT", hashDict.get(succ), keyHash, values);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     @Override
     public Uri insert(Uri uri, ContentValues values) {
         // TODO Auto-generated method stub
@@ -88,21 +110,8 @@ public class SimpleDhtProvider extends ContentProvider {
 
         try {
             BigInteger keyHash = new BigInteger(genHash(key), 16).mod(modulo);
-            if (keyHash.compareTo(myHash) < 0){
-                String file = getContext().getCacheDir().toString() + "/" + values.get("key").toString() + ".txt";
-                FileWriter fileWriter = new FileWriter(file);
-                fileWriter.write(values.get("value").toString());
-                fileWriter.flush();
-                fileWriter.close();
-            }
-            else if ((keyHash.compareTo(myHash) > 0) & (keyHash.compareTo(prev)> 0)){
+            insert(keyHash, new String[]{key, value});
 
-            }
-            else {
-                new ClientTask().execute("INSERT", succ);
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
         } catch (NoSuchAlgorithmException e){
             e.printStackTrace();
         } catch (Exception e){
@@ -117,6 +126,7 @@ public class SimpleDhtProvider extends ContentProvider {
             Log.d("HASH", portNumber + "-" + nodeHash);
             myHash = nodeHash;
             aliveNodes.add(nodeHash);
+            hashDict.put(myHash, portNumber);
             new ClientTask().execute("JOIN", portNumber, nodeHash);
 
 
@@ -154,7 +164,24 @@ public class SimpleDhtProvider extends ContentProvider {
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
                         String sortOrder) {
         // TODO Auto-generated method stub
+        String file_path = getContext().getCacheDir().toString() + "/" + selection+".txt";
+        if (new File(file_path).exists()){
+            try {
+                BufferedReader reader = new BufferedReader(new FileReader(getContext().getCacheDir().toString() + "/" + selection + ".txt"));
+                String value = reader.readLine();
+                MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
+                cursor.addRow(new Object[]{selection, value});
+                return cursor;
+            } catch (FileNotFoundException e) {
+                Log.d("FileNotFoundException", e.toString());
+            } catch (IOException e){
+                Log.d("IOException", e.toString());
+            }
+
+        }
+        Log.v("query", selection);
         return null;
+
     }
 
     @Override
@@ -173,22 +200,14 @@ public class SimpleDhtProvider extends ContentProvider {
         return formatter.toString();
     }
 
-    public void updateHashes(){
+    public void updateModulo(){
         modulo = aliveNodes.last().add(BigInteger.valueOf(1));
-        myHash = myHash.mod(modulo);
-        ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
-        for (int i = 0; i < tempHash.size(); i++) {
-            tempHash.set(i, tempHash.get(i).mod(modulo));
-            Log.d("Update hash", ""+tempHash.get(i));
-        }
-
-        aliveModuloNodes = new TreeSet<BigInteger>(tempHash);
     }
 
     public void updateNeighbours(){
 
         try {
-            ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveModuloNodes);
+            ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
             Log.d("Number of Nodes", "" + tempHash.size());
             Log.d("My Hash", ""+myHash);
 //            prev = tempHash.get(0);
@@ -208,6 +227,11 @@ public class SimpleDhtProvider extends ContentProvider {
                     prev = tempHash.get(prev_idx);
                     succ = tempHash.get(succ_idx);
                 }
+
+            }
+
+            if (myHash.compareTo(aliveNodes.first()) == 0){
+                prev = BigInteger.valueOf(0);
             }
 
         }catch (Exception e){
@@ -259,29 +283,34 @@ public class SimpleDhtProvider extends ContentProvider {
 
                     if (flag.equals("JOIN")){
                         aliveNodes.add((BigInteger) data[2]);
+                        hashDict.put((BigInteger) data[2], (String) data[1]);
                         Log.d("SERVER", data[0] + "-" + data[1]);
-                        updateHashes();
+                        updateModulo();
                         System.out.println(aliveNodes);
-                        System.out.println(aliveModuloNodes);
                         updateNeighbours();
                         System.out.println(aliveNodes);
-                        System.out.println(aliveModuloNodes);
                         Log.d("SUCC", String.valueOf(succ));
                         Log.d("PREV", String.valueOf(prev));
-                        bMulticastMessage(new Object[] {"JOIN MULTICAST", aliveNodes}, remotePorts);
+                        bMulticastMessage(new Object[] {"JOIN MULTICAST", aliveNodes, hashDict}, remotePorts);
                         Log.d("Bmulticast", "called");
                     }
 
                     else if(flag.equals("JOIN MULTICAST")){
                         aliveNodes = (TreeSet<BigInteger>) data[1];
-                        updateHashes();
+                        hashDict = (Hashtable<BigInteger, String>) data[2];
+                        updateModulo();
                         System.out.println(aliveNodes);
-                        System.out.println(aliveModuloNodes);
+                        System.out.println(hashDict);
                         updateNeighbours();
                         System.out.println(aliveNodes);
-                        System.out.println(aliveModuloNodes);
                         Log.d("SUCC", String.valueOf(succ));
                         Log.d("PREV", String.valueOf(prev));
+                    }
+
+                    else if(flag.equals("INSERT")){
+                        BigInteger keyHash = (BigInteger) data[2];
+                        String[] values = (String[]) data[3];
+                        insert(keyHash, values);
                     }
 
                 } catch (Exception e){
@@ -302,14 +331,20 @@ public class SimpleDhtProvider extends ContentProvider {
 //            String remotePort = REMOTE_PORT0;
 
             try {
-                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(REMOTE_PORT0));
 
+                String flag = (String) objects[0];
+                Socket socket = null;
+                String remotePort = REMOTE_PORT0;
+
+                if (flag.equals("INSERT")){
+                    remotePort = (String) objects[1];
+                }
+
+                socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(remotePort));
                 ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-
                 Log.d("Client", objects[0] + "-" + objects[1]);
                 out.writeObject(objects);
                 out.flush();
-
 
             } catch (Exception e){
                 e.printStackTrace();
