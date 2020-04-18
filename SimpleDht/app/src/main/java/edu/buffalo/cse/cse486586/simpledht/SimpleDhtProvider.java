@@ -23,6 +23,7 @@ import java.util.Formatter;
 import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Iterator;
+import java.util.List;
 import java.util.TreeSet;
 
 import android.annotation.SuppressLint;
@@ -107,7 +108,9 @@ public class SimpleDhtProvider extends ContentProvider {
         String value = (String) values.get(VALUE_FIELD);
 
         try {
+            Log.d("INSERT", "" + genHash(key) +  modulo);
             BigInteger keyHash = new BigInteger(genHash(key), 16).mod(modulo);
+
             insert(keyHash, new String[]{key, value});
 
         } catch (NoSuchAlgorithmException e){
@@ -124,6 +127,8 @@ public class SimpleDhtProvider extends ContentProvider {
             Log.d("HASH", portNumber + "-" + nodeHash);
             myHash = nodeHash;
             aliveNodes.add(nodeHash);
+            updateModulo();
+            updateNeighbours();
             hashDict.put(myHash, portNumber);
             new ClientTask().execute("JOIN", portNumber, nodeHash);
 
@@ -162,13 +167,24 @@ public class SimpleDhtProvider extends ContentProvider {
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
                         String sortOrder) {
         // TODO Auto-generated method stub
-
-            String value = localDB.get(selection);
-            MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
-            cursor.addRow(new Object[]{selection, value});
-            return cursor;
-
+        ArrayList<String> keysToQuery = new ArrayList<String>();
+        if (selection.equals("*")){
+            keysToQuery = new ArrayList<String>(localDB.keySet());
+        } else{
+            keysToQuery.add(selection);
         }
+        Log.d("QUERY", keysToQuery.get(0) + keysToQuery.size());
+
+        MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
+
+        for (int i =0; i < keysToQuery.size(); i++) {
+            String value = localDB.get(keysToQuery.get(i));
+            Log.d("QUERY", value + keysToQuery.get(i));
+            cursor.addRow(new Object[]{keysToQuery.get(i), value});
+        }
+
+        return cursor;
+    }
 
 
     @Override
