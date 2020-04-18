@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Formatter;
+import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.TreeSet;
@@ -49,6 +50,7 @@ public class SimpleDhtProvider extends ContentProvider {
     static final String REMOTE_PORT4 = "11124";
     ArrayList<String> remotePorts = new ArrayList<String>(5);
     Hashtable<BigInteger, String> hashDict = new Hashtable<BigInteger, String>();
+    HashMap<String, String> localDB = new HashMap<String, String>();
 
     public SimpleDhtProvider(){
 //        remotePorts.add(REMOTE_PORT0);
@@ -89,15 +91,11 @@ public class SimpleDhtProvider extends ContentProvider {
     public void insert(BigInteger keyHash, String[] values){
         try {
             if ((keyHash.compareTo(prev) > 0) & (keyHash.compareTo(myHash) < 0)) {
-                String file = getContext().getCacheDir().toString() + "/" + values[0] + ".txt";
-                FileWriter fileWriter = new FileWriter(file);
-                fileWriter.write(values[1]);
-                fileWriter.flush();
-                fileWriter.close();
+                localDB.put(values[0], values[1]);
             } else {
                 new ClientTask().execute("INSERT", hashDict.get(succ), keyHash, values);
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
@@ -164,25 +162,14 @@ public class SimpleDhtProvider extends ContentProvider {
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
                         String sortOrder) {
         // TODO Auto-generated method stub
-        String file_path = getContext().getCacheDir().toString() + "/" + selection+".txt";
-        if (new File(file_path).exists()){
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader(getContext().getCacheDir().toString() + "/" + selection + ".txt"));
-                String value = reader.readLine();
-                MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
-                cursor.addRow(new Object[]{selection, value});
-                return cursor;
-            } catch (FileNotFoundException e) {
-                Log.d("FileNotFoundException", e.toString());
-            } catch (IOException e){
-                Log.d("IOException", e.toString());
-            }
+
+            String value = localDB.get(selection);
+            MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
+            cursor.addRow(new Object[]{selection, value});
+            return cursor;
 
         }
-        Log.v("query", selection);
-        return null;
 
-    }
 
     @Override
     public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
