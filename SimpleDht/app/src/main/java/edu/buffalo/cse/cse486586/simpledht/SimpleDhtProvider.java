@@ -170,6 +170,37 @@ public class SimpleDhtProvider extends ContentProvider {
         return false;
     }
 
+    public String findQuery(String key){
+        try {
+            BigInteger keyHash = new BigInteger(genHash(key), 16);
+            ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
+
+            String remotePort = hashDict.get(tempHash.get(0));
+            for (int i =0; i < tempHash.size(); i++){
+                if (keyHash.compareTo(tempHash.get(i)) < 0){
+                    remotePort = hashDict.get(tempHash.get(i));
+                    break;
+                }
+            }
+            Log.d("Querying Remote Port", remotePort);
+            Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                    Integer.parseInt(remotePort));
+            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+            out.writeObject(new Object[]{"QUERY", key});
+            out.flush();
+
+            ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+            Object[] data = (Object[]) in.readObject();
+            return (String) data[0];
+
+        } catch (Exception e){
+            e.printStackTrace();
+        }
+
+        return "";
+    }
+
+
     public Set<String> globalQuery(){
 //        ArrayList<String> keysToQuery = new ArrayList<String>();
         HashMap<String, String> globalDB = new HashMap<String, String>();
@@ -221,6 +252,12 @@ public class SimpleDhtProvider extends ContentProvider {
         for (int i =0; i < keysToQuery.size(); i++) {
             String value = localDB.get(keysToQuery.get(i));
             Log.d("QUERY", value + keysToQuery.get(i));
+
+            if (value == null){
+
+                value = findQuery(keysToQuery.get(i));
+            }
+
             cursor.addRow(new Object[]{keysToQuery.get(i), value});
         }
 
@@ -349,6 +386,14 @@ public class SimpleDhtProvider extends ContentProvider {
                         BigInteger keyHash = (BigInteger) data[2];
                         String[] values = (String[]) data[3];
                         insert(keyHash, values);
+                    }
+
+                    else if(flag.equals("QUERY")){
+                        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                        String key = (String) data[1];
+                        Log.d("SERVER QUERY", key);
+                        out.writeObject(new Object[]{localDB.get(key)});
+                        out.flush();
                     }
                     else if (flag.equals("QUERY*")){
                         ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
