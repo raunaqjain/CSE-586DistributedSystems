@@ -75,7 +75,7 @@ public class SimpleDhtProvider extends ContentProvider {
     BigInteger myHash;
     BigInteger succ;
     BigInteger prev;
-    BigInteger modulo;
+//    BigInteger modulo;
 
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
@@ -91,7 +91,17 @@ public class SimpleDhtProvider extends ContentProvider {
 
     public void insert(BigInteger keyHash, String[] values){
         try {
-            if ((keyHash.compareTo(prev) > 0) & (keyHash.compareTo(myHash) < 0)) {
+
+            if ((prev.compareTo(myHash) > 0) || (prev.compareTo(myHash) == 0)){
+//                Log.d("INSERT",  "case 1");
+                if ((keyHash.compareTo(prev) > 0) || (keyHash.compareTo(myHash)<0)){
+                    localDB.put(values[0], values[1]);
+                }
+                else {
+                    new ClientTask().execute("INSERT", hashDict.get(succ), keyHash, values);
+                }
+            }
+            else if ((keyHash.compareTo(prev) > 0) & (keyHash.compareTo(myHash) < 0)) {
                 localDB.put(values[0], values[1]);
             } else {
                 new ClientTask().execute("INSERT", hashDict.get(succ), keyHash, values);
@@ -108,9 +118,8 @@ public class SimpleDhtProvider extends ContentProvider {
         String value = (String) values.get(VALUE_FIELD);
 
         try {
-            Log.d("INSERT", "" + genHash(key) +  modulo);
-            BigInteger keyHash = new BigInteger(genHash(key), 16).mod(modulo);
-
+            BigInteger keyHash = new BigInteger(genHash(key), 16);
+            Log.d("INSERT", keyHash + "--KEY--" + genHash(key));
             insert(keyHash, new String[]{key, value});
 
         } catch (NoSuchAlgorithmException e){
@@ -121,16 +130,16 @@ public class SimpleDhtProvider extends ContentProvider {
         return null;
     }
 
-    public void nodeJoin(String portNumber) {
+    public void nodeJoin(String portNumber, String currPort) {
         try {
             BigInteger nodeHash = new BigInteger(genHash(portNumber), 16);
             Log.d("HASH", portNumber + "-" + nodeHash);
             myHash = nodeHash;
             aliveNodes.add(nodeHash);
-            updateModulo();
+//            updateModulo();
             updateNeighbours();
-            hashDict.put(myHash, portNumber);
-            new ClientTask().execute("JOIN", portNumber, nodeHash);
+            hashDict.put(myHash, currPort);
+            new ClientTask().execute("JOIN", currPort, nodeHash);
 
 
         } catch (NoSuchAlgorithmException e) {
@@ -157,7 +166,7 @@ public class SimpleDhtProvider extends ContentProvider {
             e.printStackTrace();
         }
 
-        nodeJoin(portStr);
+        nodeJoin(portStr, currPort);
 
 
         return false;
@@ -168,7 +177,7 @@ public class SimpleDhtProvider extends ContentProvider {
                         String sortOrder) {
         // TODO Auto-generated method stub
         ArrayList<String> keysToQuery = new ArrayList<String>();
-        if (selection.equals("*")){
+        if (selection.equals("@")){
             keysToQuery = new ArrayList<String>(localDB.keySet());
         } else{
             keysToQuery.add(selection);
@@ -203,9 +212,9 @@ public class SimpleDhtProvider extends ContentProvider {
         return formatter.toString();
     }
 
-    public void updateModulo(){
-        modulo = aliveNodes.last().add(BigInteger.valueOf(1));
-    }
+//    public void updateModulo(){
+//        modulo = aliveNodes.last().add(BigInteger.valueOf(1));
+//    }
 
     public void updateNeighbours(){
 
@@ -233,9 +242,9 @@ public class SimpleDhtProvider extends ContentProvider {
 
             }
 
-            if (myHash.compareTo(aliveNodes.first()) == 0){
-                prev = BigInteger.valueOf(0);
-            }
+//            if (myHash.compareTo(aliveNodes.first()) == 0){
+//                prev = BigInteger.valueOf(0);
+//            }
 
         }catch (Exception e){
             Log.d("NEIGHBORS", "");
@@ -288,7 +297,7 @@ public class SimpleDhtProvider extends ContentProvider {
                         aliveNodes.add((BigInteger) data[2]);
                         hashDict.put((BigInteger) data[2], (String) data[1]);
                         Log.d("SERVER", data[0] + "-" + data[1]);
-                        updateModulo();
+//                        updateModulo();
                         System.out.println(aliveNodes);
                         updateNeighbours();
                         System.out.println(aliveNodes);
@@ -301,7 +310,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     else if(flag.equals("JOIN MULTICAST")){
                         aliveNodes = (TreeSet<BigInteger>) data[1];
                         hashDict = (Hashtable<BigInteger, String>) data[2];
-                        updateModulo();
+//                        updateModulo();
                         System.out.println(aliveNodes);
                         System.out.println(hashDict);
                         updateNeighbours();
