@@ -62,15 +62,6 @@ public class SimpleDhtProvider extends ContentProvider {
         remotePorts.add(REMOTE_PORT4);
     }
 
-//    public class TheComparator implements Comparator<BigInteger>, Serializable {
-//
-//        @Override
-//        public int compare(BigInteger lhs, BigInteger rhs) {
-//            return lhs.compareTo(rhs);
-//        }
-//    }
-//
-//    TreeSet<BigInteger> aliveNodes = new TreeSet<BigInteger>(new TheComparator());
     TreeSet<BigInteger> aliveNodes = new TreeSet<BigInteger>();
 
     BigInteger myHash;
@@ -80,6 +71,20 @@ public class SimpleDhtProvider extends ContentProvider {
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         // TODO Auto-generated method stub
+
+        String returnedValue = localDB.remove(selection);
+        try {
+            if (returnedValue == null) {
+                String remotePort = findRemotePort(selection);
+                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                        Integer.parseInt(remotePort));
+                ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                out.writeObject(new Object[]{"DELETE", selection});
+                out.flush();
+            }
+        } catch (Exception e){
+            e.printStackTrace();
+        }
         return 0;
     }
 
@@ -93,7 +98,6 @@ public class SimpleDhtProvider extends ContentProvider {
         try {
             Log.d("INSERT", keyHash + "--KEY--" + values[0]);
             if ((prev.compareTo(myHash) > 0) || (prev.compareTo(myHash) == 0)){
-//                Log.d("INSERT",  "case 1");
                 if ((keyHash.compareTo(prev) > 0) || (keyHash.compareTo(myHash)<0)){
                     localDB.put(values[0], values[1]);
                 }
@@ -170,18 +174,31 @@ public class SimpleDhtProvider extends ContentProvider {
         return false;
     }
 
-    public String findQuery(String key){
+    public String findRemotePort(String key){
+        String remotePort = null;
         try {
             BigInteger keyHash = new BigInteger(genHash(key), 16);
             ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
 
-            String remotePort = hashDict.get(tempHash.get(0));
-            for (int i =0; i < tempHash.size(); i++){
-                if (keyHash.compareTo(tempHash.get(i)) < 0){
+            remotePort = hashDict.get(tempHash.get(0));
+            for (int i = 0; i < tempHash.size(); i++) {
+                if (keyHash.compareTo(tempHash.get(i)) < 0) {
                     remotePort = hashDict.get(tempHash.get(i));
                     break;
                 }
             }
+
+        } catch (NoSuchAlgorithmException e){
+            e.printStackTrace();
+        }
+
+        return remotePort;
+    }
+
+    public String findQuery(String key){
+        try {
+
+            String remotePort = findRemotePort(key);
             Log.d("Querying Remote Port", remotePort);
             Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                     Integer.parseInt(remotePort));
@@ -202,7 +219,6 @@ public class SimpleDhtProvider extends ContentProvider {
 
 
     public Set<String> globalQuery(){
-//        ArrayList<String> keysToQuery = new ArrayList<String>();
         HashMap<String, String> globalDB = new HashMap<String, String>();
         for(int i = 0; i <=remotePorts.size()-1; i++) {
             try {
@@ -399,6 +415,11 @@ public class SimpleDhtProvider extends ContentProvider {
                         ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
                         out.writeObject(new Object[]{localDB});
                         out.flush();
+                    }
+
+                    else if(flag.equals("DELETE")){
+                        String keyToRemove = (String) data[1];
+                        localDB.remove(keyToRemove);
                     }
 
                 } catch (Exception e){
