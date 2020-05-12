@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.TreeSet;
 
 import android.annotation.SuppressLint;
@@ -54,32 +55,36 @@ public class SimpleDhtProvider extends ContentProvider {
     HashMap<String, String> localDB = new HashMap<String, String>();
 
     public SimpleDhtProvider(){
-//        remotePorts.add(REMOTE_PORT0);
+        remotePorts.add(REMOTE_PORT0);
         remotePorts.add(REMOTE_PORT1);
         remotePorts.add(REMOTE_PORT2);
         remotePorts.add(REMOTE_PORT3);
         remotePorts.add(REMOTE_PORT4);
     }
 
-//    public class TheComparator implements Comparator<BigInteger>, Serializable {
-//
-//        @Override
-//        public int compare(BigInteger lhs, BigInteger rhs) {
-//            return lhs.compareTo(rhs);
-//        }
-//    }
-//
-//    TreeSet<BigInteger> aliveNodes = new TreeSet<BigInteger>(new TheComparator());
     TreeSet<BigInteger> aliveNodes = new TreeSet<BigInteger>();
 
     BigInteger myHash;
     BigInteger succ;
     BigInteger prev;
-//    BigInteger modulo;
 
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         // TODO Auto-generated method stub
+
+        String returnedValue = localDB.remove(selection);
+        try {
+            if (returnedValue == null) {
+                String remotePort = findRemotePort(selection);
+                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                        Integer.parseInt(remotePort));
+                ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                out.writeObject(new Object[]{"DELETE", selection});
+                out.flush();
+            }
+        } catch (Exception e){
+            e.printStackTrace();
+        }
         return 0;
     }
 
@@ -91,9 +96,8 @@ public class SimpleDhtProvider extends ContentProvider {
 
     public void insert(BigInteger keyHash, String[] values){
         try {
-
+            Log.d("INSERT", keyHash + "--KEY--" + values[0]);
             if ((prev.compareTo(myHash) > 0) || (prev.compareTo(myHash) == 0)){
-//                Log.d("INSERT",  "case 1");
                 if ((keyHash.compareTo(prev) > 0) || (keyHash.compareTo(myHash)<0)){
                     localDB.put(values[0], values[1]);
                 }
@@ -119,7 +123,6 @@ public class SimpleDhtProvider extends ContentProvider {
 
         try {
             BigInteger keyHash = new BigInteger(genHash(key), 16);
-            Log.d("INSERT", keyHash + "--KEY--" + genHash(key));
             insert(keyHash, new String[]{key, value});
 
         } catch (NoSuchAlgorithmException e){
@@ -136,7 +139,6 @@ public class SimpleDhtProvider extends ContentProvider {
             Log.d("HASH", portNumber + "-" + nodeHash);
             myHash = nodeHash;
             aliveNodes.add(nodeHash);
-//            updateModulo();
             updateNeighbours();
             hashDict.put(myHash, currPort);
             new ClientTask().execute("JOIN", currPort, nodeHash);
@@ -172,12 +174,89 @@ public class SimpleDhtProvider extends ContentProvider {
         return false;
     }
 
+    public String findRemotePort(String key){
+        String remotePort = null;
+        try {
+            BigInteger keyHash = new BigInteger(genHash(key), 16);
+            ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
+
+            remotePort = hashDict.get(tempHash.get(0));
+            for (int i = 0; i < tempHash.size(); i++) {
+                if (keyHash.compareTo(tempHash.get(i)) < 0) {
+                    remotePort = hashDict.get(tempHash.get(i));
+                    break;
+                }
+            }
+
+        } catch (NoSuchAlgorithmException e){
+            e.printStackTrace();
+        }
+
+        return remotePort;
+    }
+
+    public String findQuery(String key){
+        try {
+
+            String remotePort = findRemotePort(key);
+            Log.d("Querying Remote Port", remotePort);
+            Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                    Integer.parseInt(remotePort));
+            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+            out.writeObject(new Object[]{"QUERY", key});
+            out.flush();
+
+            ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+            Object[] data = (Object[]) in.readObject();
+            return (String) data[0];
+
+        } catch (Exception e){
+            e.printStackTrace();
+        }
+
+        return "";
+    }
+
+
+    public Set<String> globalQuery(){
+        HashMap<String, String> globalDB = new HashMap<String, String>();
+        for(int i = 0; i <=remotePorts.size()-1; i++) {
+            try {
+                // send happens here
+                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                        Integer.parseInt(remotePorts.get(i)));
+                Log.d("Global Query", remotePorts.get(i));
+                ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                out.writeObject(new Object[]{"QUERY*"});
+                out.flush();
+
+                ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+                Object[] data = (Object[]) in.readObject();
+                globalDB.putAll((HashMap<String, String>) data[0]);
+                socket.close();
+
+            } catch (UnknownHostException e) {
+                Log.e(TAG, "ClientTask UnknownHostException");
+            } catch (IOException e) {
+                Log.e(TAG, "ClientTask socket IOException");
+            } catch (Exception e){
+                e.printStackTrace();
+            }
+        }
+
+        return globalDB.keySet();
+    }
+
     @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
                         String sortOrder) {
         // TODO Auto-generated method stub
         ArrayList<String> keysToQuery = new ArrayList<String>();
-        if (selection.equals("@")){
+
+        if (selection.equals("*")) {
+            keysToQuery = new ArrayList<String>(globalQuery());
+        }
+        else if (selection.equals("@")){
             keysToQuery = new ArrayList<String>(localDB.keySet());
         } else{
             keysToQuery.add(selection);
@@ -189,6 +268,12 @@ public class SimpleDhtProvider extends ContentProvider {
         for (int i =0; i < keysToQuery.size(); i++) {
             String value = localDB.get(keysToQuery.get(i));
             Log.d("QUERY", value + keysToQuery.get(i));
+
+            if (value == null){
+
+                value = findQuery(keysToQuery.get(i));
+            }
+
             cursor.addRow(new Object[]{keysToQuery.get(i), value});
         }
 
@@ -212,9 +297,6 @@ public class SimpleDhtProvider extends ContentProvider {
         return formatter.toString();
     }
 
-//    public void updateModulo(){
-//        modulo = aliveNodes.last().add(BigInteger.valueOf(1));
-//    }
 
     public void updateNeighbours(){
 
@@ -242,10 +324,6 @@ public class SimpleDhtProvider extends ContentProvider {
 
             }
 
-//            if (myHash.compareTo(aliveNodes.first()) == 0){
-//                prev = BigInteger.valueOf(0);
-//            }
-
         }catch (Exception e){
             Log.d("NEIGHBORS", "");
             System.out.println(aliveNodes);
@@ -253,16 +331,19 @@ public class SimpleDhtProvider extends ContentProvider {
         }
     }
 
-    public void bMulticastMessage(Object[] msg, ArrayList<String> pt){
+    public void bMulticastMessage(Object[] msg){
 
         Log.d("In BMulticast", "");
-        for(int i = 0; i <=pt.size()-1; i++) {
+        for(int i = 0; i <=remotePorts.size()-1; i++) {
             try {
+
+                if (remotePorts.get(i).equals(REMOTE_PORT0)){
+                    continue;
+                }
                 // send happens here
                 Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-                        Integer.parseInt(pt.get(i)));
-                Log.d("BMulticast", pt.get(i));
-//                Object msgToSend = msg;
+                        Integer.parseInt(remotePorts.get(i)));
+                Log.d("BMulticast", remotePorts.get(i));
                 ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
                 out.writeObject(msg);
                 out.flush();
@@ -297,20 +378,18 @@ public class SimpleDhtProvider extends ContentProvider {
                         aliveNodes.add((BigInteger) data[2]);
                         hashDict.put((BigInteger) data[2], (String) data[1]);
                         Log.d("SERVER", data[0] + "-" + data[1]);
-//                        updateModulo();
                         System.out.println(aliveNodes);
                         updateNeighbours();
                         System.out.println(aliveNodes);
                         Log.d("SUCC", String.valueOf(succ));
                         Log.d("PREV", String.valueOf(prev));
-                        bMulticastMessage(new Object[] {"JOIN MULTICAST", aliveNodes, hashDict}, remotePorts);
+                        bMulticastMessage(new Object[] {"JOIN MULTICAST", aliveNodes, hashDict});
                         Log.d("Bmulticast", "called");
                     }
 
                     else if(flag.equals("JOIN MULTICAST")){
                         aliveNodes = (TreeSet<BigInteger>) data[1];
                         hashDict = (Hashtable<BigInteger, String>) data[2];
-//                        updateModulo();
                         System.out.println(aliveNodes);
                         System.out.println(hashDict);
                         updateNeighbours();
@@ -323,6 +402,24 @@ public class SimpleDhtProvider extends ContentProvider {
                         BigInteger keyHash = (BigInteger) data[2];
                         String[] values = (String[]) data[3];
                         insert(keyHash, values);
+                    }
+
+                    else if(flag.equals("QUERY")){
+                        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                        String key = (String) data[1];
+                        Log.d("SERVER QUERY", key);
+                        out.writeObject(new Object[]{localDB.get(key)});
+                        out.flush();
+                    }
+                    else if (flag.equals("QUERY*")){
+                        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                        out.writeObject(new Object[]{localDB});
+                        out.flush();
+                    }
+
+                    else if(flag.equals("DELETE")){
+                        String keyToRemove = (String) data[1];
+                        localDB.remove(keyToRemove);
                     }
 
                 } catch (Exception e){
