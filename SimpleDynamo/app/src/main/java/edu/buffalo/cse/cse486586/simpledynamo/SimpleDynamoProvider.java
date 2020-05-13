@@ -47,8 +47,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 	ArrayList<String> remotePorts = new ArrayList<String>(5);
 	Hashtable<BigInteger, String> hashDict = new Hashtable<BigInteger, String>();
 	HashMap<String, Object[]> localDB = new HashMap<String, Object[]>();
-//	HashMap<String, String> replicatedDB1 = new HashMap<String, String>();
-//	HashMap<String, String> replicatedDB2 = new HashMap<String, String>();
 
 	public SimpleDynamoProvider(){
 		remotePorts.add(REMOTE_PORT0);
@@ -63,6 +61,28 @@ public class SimpleDynamoProvider extends ContentProvider {
 	BigInteger myHash;
 	BigInteger succ;
 	BigInteger prev;
+
+
+	public String findRemotePort(String key){
+		String remotePort = null;
+		try {
+			BigInteger keyHash = new BigInteger(genHash(key), 16);
+			ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
+
+			remotePort = hashDict.get(tempHash.get(0));
+			for (int i = 0; i < tempHash.size(); i++) {
+				if (keyHash.compareTo(tempHash.get(i)) < 0) {
+					remotePort = hashDict.get(tempHash.get(i));
+					break;
+				}
+			}
+
+		} catch (NoSuchAlgorithmException e){
+			e.printStackTrace();
+		}
+
+		return remotePort;
+	}
 
 	@Override
 	public int delete(Uri uri, String selection, String[] selectionArgs) {
@@ -90,43 +110,20 @@ public class SimpleDynamoProvider extends ContentProvider {
 		return null;
 	}
 
-	public void replicate(Object[] values) {
+	public void replicate(BigInteger keyHash, Object[] values) {
 
 		ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
-		int i;
-		for (i = 0; i < tempHash.size(); i++) {
-			if (myHash.compareTo(tempHash.get(i)) == 0) {
+		int index = 0;
+		for (int i = 0; i < tempHash.size(); i++) {
+			if (keyHash.compareTo(tempHash.get(i)) < 0) {
+				index = i;
 				break;
 			}
 		}
 
+		new ClientTask().execute("REPLICATE 1", hashDict.get(tempHash.get((index + 1) % tempHash.size())), values);
+		new ClientTask().execute("REPLICATE 2", hashDict.get(tempHash.get((index + 2) % tempHash.size())), values);
 
-		new ClientTask().execute("REPLICATE 1", hashDict.get(tempHash.get((i + 1) % tempHash.size())), values);
-		new ClientTask().execute("REPLICATE 2", hashDict.get(tempHash.get((i + 2) % tempHash.size())), values);
-
-	}
-
-	public void insert(BigInteger keyHash, Object[] values){
-		try {
-			Log.d("INSERT", keyHash + "--KEY--" + values[0]);
-			if ((prev.compareTo(myHash) > 0) || (prev.compareTo(myHash) == 0)){
-				if ((keyHash.compareTo(prev) > 0) || (keyHash.compareTo(myHash)<0)){
-					localDB.put((String) values[0], new Object[]{values[1], String.valueOf(0), values[2]});
-					replicate(values);
-				}
-				else {
-					new ClientTask().execute("INSERT", hashDict.get(succ), keyHash, values);
-				}
-			}
-			else if ((keyHash.compareTo(prev) > 0) & (keyHash.compareTo(myHash) < 0)) {
-				localDB.put((String) values[0], new Object[]{values[1], String.valueOf(0), values[2]});
-				replicate(values);
-			} else {
-				new ClientTask().execute("INSERT", hashDict.get(succ), keyHash, values);
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
 	}
 
 	@Override
@@ -139,7 +136,27 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 		try {
 			BigInteger keyHash = new BigInteger(genHash(key), 16);
-			insert(keyHash, new Object[]{key, value, currentTime});
+//			insert(keyHash, new Object[]{key, value, currentTime});
+
+			Object[] valueToInsert = new Object[]{value, String.valueOf(0), currentTime};
+			replicate(keyHash, new Object[]{key, value, currentTime});
+
+			Log.d("INSERT", keyHash + "--KEY--" + key);
+			if ((prev.compareTo(myHash) > 0) || (prev.compareTo(myHash) == 0)){
+				if ((keyHash.compareTo(prev) > 0) || (keyHash.compareTo(myHash)<0)){
+					localDB.put(key, valueToInsert);
+				}
+				else {
+					String remotePort = findRemotePort(key);
+					new ClientTask().execute("INSERT", remotePort, key, valueToInsert);
+				}
+			}
+			else if ((keyHash.compareTo(prev) > 0) & (keyHash.compareTo(myHash) < 0)) {
+				localDB.put(key, valueToInsert);
+			} else {
+				String remotePort = findRemotePort(key);
+				new ClientTask().execute("INSERT", remotePort, key, valueToInsert);
+			}
 
 		} catch (NoSuchAlgorithmException e){
 			e.printStackTrace();
@@ -198,26 +215,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 		return false;
 	}
 
-	public String findRemotePort(String key){
-		String remotePort = null;
-		try {
-			BigInteger keyHash = new BigInteger(genHash(key), 16);
-			ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
-
-			remotePort = hashDict.get(tempHash.get(0));
-			for (int i = 0; i < tempHash.size(); i++) {
-				if (keyHash.compareTo(tempHash.get(i)) < 0) {
-					remotePort = hashDict.get(tempHash.get(i));
-					break;
-				}
-			}
-
-		} catch (NoSuchAlgorithmException e){
-			e.printStackTrace();
-		}
-
-		return remotePort;
-	}
 
 	public Object[] findQuery(String key){
 		try {
@@ -366,32 +363,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 		}
 	}
 
-//	public void bMulticastMessage(Object[] msg){
-//
-//		Log.d("In BMulticast", "");
-//		for(int i = 0; i <=remotePorts.size()-1; i++) {
-//			try {
-//
-//				if (remotePorts.get(i).equals(REMOTE_PORT0)){
-//					continue;
-//				}
-//				// send happens here
-//				Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-//						Integer.parseInt(remotePorts.get(i)));
-//				Log.d("BMulticast", remotePorts.get(i));
-//				ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-//				out.writeObject(msg);
-//				out.flush();
-//				socket.close();
-//
-//			} catch (UnknownHostException e) {
-//				Log.e(TAG, "ClientTask UnknownHostException");
-//			} catch (IOException e) {
-//				Log.e(TAG, "ClientTask socket IOException");
-//			}
-//		}
-//	}
-
 	private class ServerTask extends AsyncTask<Object, Void, Void> {
 
 		@Override
@@ -409,34 +380,12 @@ public class SimpleDynamoProvider extends ContentProvider {
 					String flag = (String) data[0];
 					Log.d("SERVER", flag);
 
-//					if (flag.equals("JOIN")){
-//						aliveNodes.add((BigInteger) data[2]);
-//						hashDict.put((BigInteger) data[2], (String) data[1]);
-//						Log.d("SERVER", data[0] + "-" + data[1]);
-//						System.out.println(aliveNodes);
-//						updateNeighbours();
-//						System.out.println(aliveNodes);
-//						Log.d("SUCC", String.valueOf(succ));
-//						Log.d("PREV", String.valueOf(prev));
-//						bMulticastMessage(new Object[] {"JOIN MULTICAST", aliveNodes, hashDict});
-//						Log.d("Bmulticast", "called");
-//					}
-//
-//					else if(flag.equals("JOIN MULTICAST")){
-//						aliveNodes = (TreeSet<BigInteger>) data[1];
-//						hashDict = (Hashtable<BigInteger, String>) data[2];
-//						System.out.println(aliveNodes);
-//						System.out.println(hashDict);
-//						updateNeighbours();
-//						System.out.println(aliveNodes);
-//						Log.d("SUCC", String.valueOf(succ));
-//						Log.d("PREV", String.valueOf(prev));
-//					}
-
 					if(flag.equals("INSERT")){
-						BigInteger keyHash = (BigInteger) data[2];
-						Object[] values = (Object[]) data[3];
-						insert(keyHash, values);
+						String key = (String) data[2];
+						Object[] valueToInsert = (Object[]) data[3];
+//						insert(keyHash, values);
+						localDB.put(key, valueToInsert);
+
 					}
 
 					else if(flag.equals("QUERY")){
