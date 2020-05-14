@@ -23,12 +23,16 @@ import java.util.TreeSet;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.AsyncTask;
+import android.preference.PreferenceManager;
 import android.telephony.TelephonyManager;
 import android.util.Log;
+
+import static android.content.Context.MODE_PRIVATE;
 
 public class SimpleDynamoProvider extends ContentProvider {
 
@@ -63,46 +67,41 @@ public class SimpleDynamoProvider extends ContentProvider {
 	BigInteger prev;
 
 
-	public String findRemotePort(String key){
-		String remotePort = null;
-		try {
-			BigInteger keyHash = new BigInteger(genHash(key), 16);
-			ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
-
-			remotePort = hashDict.get(tempHash.get(0));
-			for (int i = 0; i < tempHash.size(); i++) {
-				if (keyHash.compareTo(tempHash.get(i)) < 0) {
-					remotePort = hashDict.get(tempHash.get(i));
-					break;
-				}
-			}
-
-		} catch (NoSuchAlgorithmException e){
-			e.printStackTrace();
-		}
-
-		return remotePort;
-	}
-
 	@Override
 	public int delete(Uri uri, String selection, String[] selectionArgs) {
 		// TODO Auto-generated method stub
 
-		Object[] returnedValue = localDB.remove(selection);
-		try {
-			if (returnedValue == null) {
-				String remotePort = findRemotePort(selection);
+		ArrayList<String> remotePorts = findRemotePorts(selection);
+		for (String remotePort : remotePorts) {
+			try {
 				Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
 						Integer.parseInt(remotePort));
 				ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
 				out.writeObject(new Object[]{"DELETE", selection});
 				out.flush();
+
+			} catch (Exception e) {
+				e.printStackTrace();
 			}
-		} catch (Exception e){
-			e.printStackTrace();
 		}
 		return 0;
 	}
+
+//		Object[] returnedValue = localDB.remove(selection);
+//		try {
+//			if (returnedValue == null) {
+//				String remotePort = findRemotePort(selection);
+//				Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+//						Integer.parseInt(remotePort));
+//				ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+//				out.writeObject(new Object[]{"DELETE", selection});
+//				out.flush();
+//			}
+//		} catch (Exception e){
+//			e.printStackTrace();
+//		}
+//		return 0;
+//	}
 
 	@Override
 	public String getType(Uri uri) {
@@ -121,8 +120,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 			}
 		}
 
-		new ClientTask().execute("REPLICATE 1", hashDict.get(tempHash.get((index + 1) % tempHash.size())), values);
-		new ClientTask().execute("REPLICATE 2", hashDict.get(tempHash.get((index + 2) % tempHash.size())), values);
+		new ClientTask().execute("REPLICATE", hashDict.get(tempHash.get((index + 1) % tempHash.size())), values, "1");
+		new ClientTask().execute("REPLICATE", hashDict.get(tempHash.get((index + 2) % tempHash.size())), values, "2");
 
 	}
 
@@ -190,6 +189,68 @@ public class SimpleDynamoProvider extends ContentProvider {
 		}
 	}
 
+//	public void dataRecovery(String remotePort, String identifier) {
+//
+////		for (int i = 0; i < remotePort.length; i++) {
+//		try {
+//			Object[] msg = new Object[]{"RECOVERY"};
+//			Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(remotePort));
+//			ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+//			out.writeObject(msg);
+//			out.flush();
+//
+//			ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+//			HashMap<String, Object[]> data = (HashMap<String, Object[]>) in.readObject();
+//
+//			for (Map.Entry<String, Object[]> entry: data.entrySet()) {
+//				Object[] value = entry.getValue();
+//
+//				if (value[1].equals(identifier)) {
+////						if (localDB.containsKey(entry.getKey())) {
+////							if (((Date) localDB.get(entry.getKey())[2]).compareTo((Date) value[2]) < 0) {
+////								localDB.put(entry.getKey(), entry.getValue());
+////								continue;
+////							}
+////						}
+//					localDB.put(entry.getKey(), entry.getValue());
+//				}
+//			}
+//
+//			} catch (Exception e) {
+//			e.printStackTrace();
+//		}
+////		}
+//	}
+
+	public int getModulus(int number, int size){
+		number = (number) % size;
+		if (number < 0) number += size;
+		return number;
+	}
+
+	public void recoveryMode(){
+		Log.d("RECOVERY MODE", "recovering data");
+		ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
+		int i;
+		for (i=0; i<tempHash.size(); i++){
+			if (myHash.compareTo(tempHash.get(i)) == 0){
+				break;
+			}
+		}
+
+
+
+		new ClientTask().execute("RECOVERY", hashDict.get(tempHash.get(getModulus(i + 1, tempHash.size()))), "1", "0");
+		new ClientTask().execute("RECOVERY", hashDict.get(tempHash.get(getModulus(i - 1, tempHash.size()))), "0", "1");
+		new ClientTask().execute("RECOVERY", hashDict.get(tempHash.get(getModulus(i - 2, tempHash.size()))), "0", "2");
+////		String[] remotePorts = new String[]{hashDict.get(tempHash.get((i + 1) % tempHash.size())), hashDict.get(tempHash.get((i + 2) % tempHash.size()))};
+//		dataRecovery(hashDict.get(tempHash.get((i + 1) % tempHash.size())), "0");
+//
+////		remotePorts = new String[]{hashDict.get(tempHash.get((i - 1) % tempHash.size())), hashDict.get(tempHash.get((i - 2) % tempHash.size()))};
+//		dataRecovery(hashDict.get(tempHash.get((i - 1) % tempHash.size())), "1");
+//		dataRecovery(hashDict.get(tempHash.get((i - 2) % tempHash.size())), "2");
+	}
+
 	@Override
 	public boolean onCreate() {
 		// TODO Auto-generated method stub
@@ -197,6 +258,20 @@ public class SimpleDynamoProvider extends ContentProvider {
 		String portStr = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
 		final String currPort = String.valueOf((Integer.parseInt(portStr)*2));
 		Log.d("MAIN", portStr);
+		nodeJoin(portStr, currPort);
+
+
+//		boolean isAlive = true;
+//		SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(getContext());
+//		isAlive = preferences.getBoolean("isAlive", false);
+
+//		if (isAlive) {
+		recoveryMode();
+//		} else {
+//			SharedPreferences.Editor editor = preferences.edit();
+//			editor.putBoolean("isAlive", isAlive); // value to store
+//			editor.commit();
+//		}
 
 		try{
 
@@ -209,33 +284,85 @@ public class SimpleDynamoProvider extends ContentProvider {
 			e.printStackTrace();
 		}
 
-		nodeJoin(portStr, currPort);
 
 
 		return false;
 	}
 
-
-	public Object[] findQuery(String key){
+	public String findRemotePort(String key){
+		String remotePort = null;
 		try {
+			BigInteger keyHash = new BigInteger(genHash(key), 16);
+			ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
 
-			String remotePort = findRemotePort(key);
-			Log.d("Querying Remote Port", remotePort);
-			Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-					Integer.parseInt(remotePort));
-			ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-			out.writeObject(new Object[]{"QUERY", key});
-			out.flush();
+			remotePort = hashDict.get(tempHash.get(0));
+			for (int i = 0; i < tempHash.size(); i++) {
+				if (keyHash.compareTo(tempHash.get(i)) < 0) {
+					remotePort = hashDict.get(tempHash.get(i));
+					break;
+				}
+			}
 
-			ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
-			Object[] data = (Object[]) in.readObject();
-			return (Object[]) data[0];
-
-		} catch (Exception e){
+		} catch (NoSuchAlgorithmException e){
 			e.printStackTrace();
 		}
 
-		return new Object[]{""};
+		return remotePort;
+	}
+
+	public ArrayList<String> findRemotePorts(String key){
+		ArrayList<String> remotePorts = new ArrayList<String>();
+		try {
+			BigInteger keyHash = new BigInteger(genHash(key), 16);
+			ArrayList<BigInteger> tempHash = new ArrayList<BigInteger>(aliveNodes);
+
+			int index = 0;
+			for (int i = 0; i < tempHash.size(); i++) {
+				if (keyHash.compareTo(tempHash.get(i)) < 0) {
+					index = i;
+					break;
+				}
+			}
+
+			remotePorts.add(hashDict.get(tempHash.get(getModulus(index, tempHash.size()))));
+			remotePorts.add(hashDict.get(tempHash.get(getModulus(index+1, tempHash.size()))));
+			remotePorts.add(hashDict.get(tempHash.get(getModulus(index+2, tempHash.size()))));
+
+		}catch (Exception e){
+			e.printStackTrace();
+		}
+
+		return remotePorts;
+	}
+
+	public Object[] findQuery(String key){
+		ArrayList<String> remotePorts = findRemotePorts(key);
+		Log.d("QUERYING", "remote ports and replication");
+		HashMap<String, Object[]> tempDB = new HashMap<String, Object[]>();
+
+		for (String remotePort: remotePorts) {
+			try {
+				Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+						Integer.parseInt(remotePort));
+				ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+				out.writeObject(new Object[]{"QUERY", key});
+				out.flush();
+
+				ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+				Object[] value = (Object[]) in.readObject();
+				if (tempDB.containsKey(key)){
+					if ((((Date) tempDB.get(key)[2]).compareTo((Date) value[2])) < 0){
+						tempDB.put(key, value);
+						continue;
+					}
+				}
+				tempDB.put(key, value);
+
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+		return tempDB.get(key);
 	}
 
 
@@ -392,10 +519,10 @@ public class SimpleDynamoProvider extends ContentProvider {
 						ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
 						String key = (String) data[1];
 						Log.d("SERVER QUERY", key);
-						out.writeObject(new Object[]{localDB.get(key)});
+						out.writeObject(localDB.get(key));
 						out.flush();
 					}
-					else if (flag.equals("QUERY*")){
+					else if (flag.equals("QUERY*") || flag.equals("RECOVERY")){
 						ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
 						out.writeObject(new Object[]{localDB});
 						out.flush();
@@ -406,16 +533,15 @@ public class SimpleDynamoProvider extends ContentProvider {
 						localDB.remove(keyToRemove);
 					}
 
-					else if(flag.equals("REPLICATE 1")){
+					else if(flag.equals("REPLICATE")){
 						Object[] values = (Object[]) data[2];
-						localDB.put((String) values[0], new Object[]{values[1], String.valueOf(1), values[2]});
+						localDB.put((String) values[0], new Object[]{values[1], String.valueOf(data[3]), values[2]});
 					}
 
-					else if(flag.equals("REPLICATE 2")){
-						Object[] values = (Object[]) data[2];
-						localDB.put((String) values[0], new Object[]{values[1], String.valueOf(2), values[2]});
-					}
-
+//					else if(flag.equals("REPLICATE 2")){
+//						Object[] values = (Object[]) data[2];
+//						localDB.put((String) values[0], new Object[]{values[1], String.valueOf(2), values[2]});
+//					}
 					socket.close();
 
 				} catch (Exception e){
@@ -436,6 +562,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 //            String remotePort = REMOTE_PORT0;
 
 			try {
+				String flag = (String) objects[0];
 				String remotePort = (String) objects[1];
 
 
@@ -445,6 +572,28 @@ public class SimpleDynamoProvider extends ContentProvider {
 				out.writeObject(objects);
 				out.flush();
 
+				if (flag.equals("RECOVERY")) {
+					String identifier = (String) objects[2];
+					String replace = (String) objects[3];
+					ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+					Object[] data = (Object[]) in.readObject();
+					HashMap<String, Object[]> recoveryData = (HashMap<String, Object[]>) data[0];
+
+					for (Map.Entry<String, Object[]> entry : recoveryData.entrySet()) {
+						Object[] value = entry.getValue();
+
+						if (value[1].equals(identifier)) {
+//						if (localDB.containsKey(entry.getKey())) {
+//							if (((Date) localDB.get(entry.getKey())[2]).compareTo((Date) value[2]) < 0) {
+//								localDB.put(entry.getKey(), entry.getValue());
+//								continue;
+//							}
+//						}
+							value[1] = replace;
+							localDB.put(entry.getKey(), value);
+						}
+					}
+				}
 			} catch (Exception e){
 				e.printStackTrace();
 			}
